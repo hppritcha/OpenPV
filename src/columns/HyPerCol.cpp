@@ -204,7 +204,7 @@ int HyPerCol::initialize(const char *name, PV_Init *initObj) {
    mCurrentStep = mInitialStep;
    mFinalStep   = (long int)nearbyint(mStopTime / mDeltaTime);
    mCheckpointer->provideFinalStep(mFinalStep);
-   mNextProgressTime = mStartTime + mProgressInterval;
+   mNextProgressTime = mProgressInterval;
 
    RandomSeed::instance()->initialize(mRandomSeed);
 
