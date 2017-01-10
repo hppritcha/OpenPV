@@ -2309,6 +2309,12 @@ int HyPerConn::updateState(double simTime, double dt) {
 
    update_timer->start();
    if (needUpdate(simTime, dt)) {
+      // waitall for the requests made by calc_dW() in previous update
+      if(m_dWReduceRequests.size() > 0) {
+        MPI_Waitall(m_dWReduceRequests.size(), m_dWReduceRequests.data(), MPI_STATUSES_IGNORE);
+        m_dWReduceRequests.clear();
+      }
+
       status = calc_dW(); // Calculate changes in weights
       for (int arborId = 0; arborId < numberOfAxonalArborLists(); arborId++) {
          status = updateWeights(arborId); // Apply changes in weights
@@ -2359,16 +2365,19 @@ int HyPerConn::clear_numActivations(int arborId) {
 int HyPerConn::clear_dW(int arborId) {
    // zero out all dW.
    // This also zeroes out the unused parts of shrunken patches
+   int syPatch     = syp;
+   int nkPatch     = nfp * nxp;
    for (int kArbor = 0; kArbor < numberOfAxonalArborLists(); kArbor++) {
+#ifdef PV_USE_OPENMP_THREADS
+#pragma omp parallel for 
+#endif
       for (int kKernel = 0; kKernel < getNumDataPatches(); kKernel++) {
-         int syPatch     = syp;
-         int nkPatch     = nfp * nxp;
          float *dWeights = get_dwDataHead(kArbor, kKernel);
          for (int kyPatch = 0; kyPatch < nyp; kyPatch++) {
             for (int kPatch = 0; kPatch < nkPatch; kPatch++) {
-               dWeights[kPatch] = 0.0f;
+               dWeights[kyPatch*syPatch + kPatch] = 0.0f;
             }
-            dWeights += syPatch;
+           // dWeights += syPatch;
          }
       }
    }
@@ -2431,13 +2440,16 @@ int HyPerConn::reduceActivations(int arborID) {
    const int nProcs   = nxProcs * nyProcs * nbProcs;
    if (numKernelActivations && nProcs != 1) {
       const MPI_Comm mpi_comm = comm->globalCommunicator();
-      int ierr;
       const int numPatches   = getNumDataPatches();
       const size_t patchSize = (size_t)nxp * (size_t)nyp * (size_t)nfp;
       const size_t localSize = numPatches * patchSize;
       const size_t arborSize = localSize * numberOfAxonalArborLists();
-      ierr                   = MPI_Allreduce(
-            MPI_IN_PLACE, get_activations(arborID), arborSize, MPI_LONG, MPI_SUM, mpi_comm);
+
+      auto sz = m_dWReduceRequests.size();
+      m_dWReduceRequests.resize(sz + 1);
+      MPI_Iallreduce(
+            MPI_IN_PLACE, get_activations(arborID), arborSize, MPI_LONG, MPI_SUM, mpi_comm, 
+            &(m_dWReduceRequests.data())[sz]);
    }
 
    return PV_BREAK;
@@ -2456,9 +2468,12 @@ int HyPerConn::reduceKernels(int arborID) {
       const size_t patchSize  = (size_t)nxp * (size_t)nyp * (size_t)nfp;
       const size_t localSize  = (size_t)numPatches * (size_t)patchSize;
       const size_t arborSize  = localSize * (size_t)numberOfAxonalArborLists();
-      int ierr;
-      ierr = MPI_Allreduce(
-            MPI_IN_PLACE, get_dwDataStart(arborID), arborSize, MPI_FLOAT, MPI_SUM, mpi_comm);
+
+      auto sz = m_dWReduceRequests.size();
+      m_dWReduceRequests.resize(sz + 1);
+      MPI_Iallreduce(
+            MPI_IN_PLACE, get_dwDataStart(arborID), arborSize, MPI_FLOAT, MPI_SUM, mpi_comm,
+            &(m_dWReduceRequests.data())[sz]);
    }
 
    return PV_BREAK;
@@ -2478,6 +2493,15 @@ void HyPerConn::reduceAcrossBatch(int arborID) {
 int HyPerConn::calc_dW() {
    pvAssert(plasticityFlag);
    int status;
+   if (normalizeDwFlag) {
+      for (int arborId = 0; arborId < numberOfAxonalArborLists(); arborId++) {
+         status = normalize_dW(arborId);
+         if (status == PV_BREAK) {
+            break;
+         }
+         pvAssert(status == PV_SUCCESS);
+      }
+   }
    for (int arborId = 0; arborId < numberOfAxonalArborLists(); arborId++) {
       status = initialize_dW(arborId);
       if (status == PV_BREAK) {
@@ -2498,15 +2522,6 @@ int HyPerConn::calc_dW() {
          break;
       }
       pvAssert(status == PV_SUCCESS);
-   }
-   if (normalizeDwFlag) {
-      for (int arborId = 0; arborId < numberOfAxonalArborLists(); arborId++) {
-         status = normalize_dW(arborId);
-         if (status == PV_BREAK) {
-            break;
-         }
-         pvAssert(status == PV_SUCCESS);
-      }
    }
    return status;
 }

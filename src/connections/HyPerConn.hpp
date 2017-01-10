@@ -497,6 +497,7 @@ class HyPerConn : public BaseConnection {
    bool symmetrizeWeightsFlag;
    long **numKernelActivations;
    bool keepKernelsSynchronized_flag;
+   std::vector<MPI_Request> m_dWReduceRequests;
 
    Random *randState;
 

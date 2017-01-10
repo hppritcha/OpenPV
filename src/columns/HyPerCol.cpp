@@ -1024,6 +1024,10 @@ int HyPerCol::advanceTime(double sim_time) {
    // Each layer's phase establishes a priority for updating
    for (int phase = 0; phase < mNumPhases; phase++) {
 
+      // Rotate DataStore ring buffers, copy activity buffer to DataStore, and do
+      // MPI exchange.
+      notify(std::make_shared<LayerPublishMessage>(phase, mSimTime));
+
 // Ordering needs to go recvGpu, if(recvGpu and upGpu)update, recvNoGpu, update
 // rest
 #ifdef PV_USE_CUDA
@@ -1061,10 +1065,6 @@ int HyPerCol::advanceTime(double sim_time) {
                    phase, mPhaseRecvTimers.at(phase), mSimTime, mDeltaTime),
              std::make_shared<LayerUpdateStateMessage>(phase, mSimTime, mDeltaTime)});
 #endif
-
-      // Rotate DataStore ring buffers, copy activity buffer to DataStore, and do
-      // MPI exchange.
-      notify(std::make_shared<LayerPublishMessage>(phase, mSimTime));
 
       // wait for all published data to arrive and call layer's outputState
 
