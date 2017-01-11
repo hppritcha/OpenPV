@@ -1042,8 +1042,12 @@ int HyPerLayer::respondLayerPublish(LayerPublishMessage const *message) {
    if (message->mPhase != getPhase()) {
       return status;
    }
+   if (!mNeedToPublish) {
+      return status;
+   }
    publisher->increaseTimeLevel();
    publish(getParent()->getCommunicator(), message->mTime);
+   mNeedToPublish = false;
    return status;
 }
 
@@ -1818,7 +1822,7 @@ int HyPerLayer::callUpdateState(double simTime, double dt) {
       updatedDeviceDatastore = true;
 #endif
       update_timer->stop();
-
+      mNeedToPublish = true;
       mLastUpdateTime = simTime;
    }
    return status;
